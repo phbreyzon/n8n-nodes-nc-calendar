@@ -167,6 +167,20 @@ export class NextcloudCalendar implements INodeType {
             return '';
         };
 
+        // Hilfsfunktion zum Extrahieren der Zeitzone aus dem resourceLocator
+        const getTimeZoneName = (timeZoneParam: unknown): string => {
+            if (typeof timeZoneParam === 'string') {
+                return timeZoneParam.trim();
+            }
+            if (typeof timeZoneParam === 'object' && timeZoneParam !== null) {
+                const obj = timeZoneParam as { value?: unknown; id?: unknown };
+                const value = typeof obj.value === 'string' ? obj.value : undefined;
+                const id = typeof obj.id === 'string' ? obj.id : undefined;
+                return (value || id || '').trim();
+            }
+            return '';
+        };
+
         for (let i = 0; i < items.length; i++) {
             try {
                 if (resource === 'calendar') {
@@ -232,16 +246,9 @@ export class NextcloudCalendar implements INodeType {
                         };
 
                         // Zeitzone übernehmen (resourceLocator: list/id oder leer)
-                        const tzParam = this.getNodeParameter('timeZone', i, '') as unknown;
-                        if (tzParam && typeof tzParam === 'object' && tzParam !== null) {
-                            const tzObj = tzParam as { value?: unknown; id?: unknown };
-                            const tzValue = typeof tzObj.value === 'string' ? tzObj.value
-                                : (typeof tzObj.id === 'string' ? tzObj.id : '');
-                            if (tzValue) {
-                                (eventData as { timeZone?: string }).timeZone = tzValue;
-                            }
-                        } else if (typeof tzParam === 'string' && tzParam.trim().length > 0) {
-                            (eventData as { timeZone?: string }).timeZone = tzParam.trim();
+                        const timeZone = getTimeZoneName(this.getNodeParameter('timeZone', i, ''));
+                        if (timeZone) {
+                            eventData.timeZone = timeZone;
                         }
 
                         // Teilnehmer immer verarbeiten, wenn vorhanden
@@ -354,12 +361,29 @@ export class NextcloudCalendar implements INodeType {
                         const updateData: IEventUpdate = {
                             calendarName,
                             eventId,
-                            title: updateFields.title as string,
-                            start: updateFields.start as string,
-                            end: updateFields.end as string,
-                            description: updateFields.description as string | undefined,
-                            location: updateFields.location as string | undefined,
                         };
+
+                        // Nur tatsächlich gesetzte Felder übergeben, damit der bestehende
+                        // Termin nicht unbeabsichtigt geleert wird
+                        const assignIfSet = (key: 'title' | 'start' | 'end' | 'description' | 'location', value: unknown) => {
+                            if (value === undefined || value === null) {
+                                return;
+                            }
+                            updateData[key] = value as string;
+                        };
+
+                        assignIfSet('title', updateFields.title);
+                        assignIfSet('start', updateFields.start);
+                        assignIfSet('end', updateFields.end);
+                        assignIfSet('description', updateFields.description);
+                        assignIfSet('location', updateFields.location);
+
+                        // Zeitzone übernehmen (resourceLocator: list/id oder leer).
+                        // Leer lassen übernimmt die Zeitzone des bestehenden Termins.
+                        const timeZone = getTimeZoneName(this.getNodeParameter('timeZone', i, ''));
+                        if (timeZone) {
+                            updateData.timeZone = timeZone;
+                        }
 
                         // Teilnehmer immer verarbeiten, wenn vorhanden
                         const attendees = this.getNodeParameter('attendees', i, {}) as IDataObject;
