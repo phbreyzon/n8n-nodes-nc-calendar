@@ -27,6 +27,8 @@ export interface IEventResponse extends IDataObject {
     title?: string;
     start?: string;
     end?: string;
+    rawDTStart?: string;
+    rawDTEnd?: string;
     tzidStart?: string;
     tzidEnd?: string;
     dtstamp?: string;

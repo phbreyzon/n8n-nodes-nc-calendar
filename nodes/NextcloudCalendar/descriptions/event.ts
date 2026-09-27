@@ -318,10 +318,10 @@ export const eventFields: INodeProperties[] = [
         displayOptions: {
             show: {
                 resource: ['event'],
-                operation: ['create'],
+                operation: ['create', 'update'],
             },
         },
-        description: 'Wählen Sie eine IANA-Zeitzone aus der Liste oder geben Sie sie manuell ein. Leer lassen für UTC.',
+        description: 'Wählen Sie eine IANA-Zeitzone aus der Liste oder geben Sie sie manuell ein. Leer lassen für UTC. Beim Ändern wird die Zeitzone des bestehenden Termins übernommen, wenn das Feld leer bleibt.',
         // @ts-expect-error: AIEnabled ist kein Standardfeld, wird aber von n8n AI genutzt
         AIEnabled: true,
     },

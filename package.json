@@ -1,22 +1,23 @@
 {
-  "name": "n8n-nodes-nextcloud-calendar",
-  "version": "0.1.56",
+  "name": "n8n-nodes-nc-calendar",
+  "version": "0.1.57",
   "description": "n8n Node für die Integration mit Nextcloud Calendar",
   "keywords": [
     "n8n-community-node-package",
     "n8n-node-nextcloud",
     "nextcloud",
+    "caldav",
     "calendar"
   ],
   "license": "MIT",
-  "homepage": "https://n8n.io",
+  "homepage": "https://github.com/phbreyzon/n8n-nodes-nc-calendar#readme",
   "author": {
-    "name": "Niko Terschawetz",
-    "email": "nt@terschaweb.de"
+    "name": "phbreyzon",
+    "email": "phbreyzon@users.noreply.github.com"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/terschawebIT/n8n-nodes-nextcloud-calendar.git"
+    "url": "git+https://github.com/phbreyzon/n8n-nodes-nc-calendar.git"
   },
   "main": "index.js",
   "scripts": {

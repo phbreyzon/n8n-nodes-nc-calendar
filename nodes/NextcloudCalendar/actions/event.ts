@@ -157,10 +157,6 @@ export async function updateEvent(
     const calendar = await findCalendar(context, client, data.calendarName);
 
     const existingEvent = await getEvent(context, data.calendarName, data.eventId);
-    const updatedEvent = {
-        ...existingEvent,
-        ...data,
-    };
 
     const events = await client.fetchCalendarObjects({
         calendar,
@@ -195,6 +191,42 @@ export async function updateEvent(
         throw new Error(`Event with ID "${data.eventId}" not found`);
     }
 
+    // Zeitzone: explizite Auswahl des Nutzers, sonst die Zeitzone des bestehenden Termins
+    // übernehmen, damit beim Ändern keine Zeitzonen-Verschiebung entsteht.
+    // Nicht von Intl unterstützte Zeitzonen (z. B. eigene VTIMEZONE-Definitionen) werden ignoriert.
+    const requestedTimeZone = typeof data.timeZone === 'string' ? data.timeZone.trim() : '';
+    const fallbackTimeZone = (existingEvent.tzidStart ?? '').trim();
+    const candidateTimeZone = requestedTimeZone || fallbackTimeZone;
+    const timeZone = isValidTimeZone(candidateTimeZone) ? candidateTimeZone : '';
+
+    // Nur Felder übernehmen, die tatsächlich gesetzt wurden. Undefinierte Felder dürfen
+    // die bestehenden Werte des Termins nicht überschreiben.
+    const updatedEvent: IEventICal = {
+        uid: existingEvent.uid || data.eventId,
+        title: data.title ?? existingEvent.title,
+        description: data.description ?? existingEvent.description,
+        location: data.location ?? existingEvent.location,
+        attendees: data.attendees ?? existingEvent.attendees,
+        timeZone,
+    };
+
+    if (data.start) {
+        updatedEvent.start = data.start;
+    }
+    if (data.end) {
+        updatedEvent.end = data.end;
+    }
+
+    // Unveränderte Start-/Endzeit exakt so übernehmen, wie sie im Termin hinterlegt ist
+    // (inklusive ursprünglichem TZID). Andernfalls würde die Zeit verschoben.
+    const options: IICalOptions = {};
+    if (!data.start && existingEvent.rawDTStart) {
+        options.startLine = existingEvent.rawDTStart;
+    }
+    if (!data.end && existingEvent.rawDTEnd) {
+        options.endLine = existingEvent.rawDTEnd;
+    }
+
     // Spezielle Header für Einladungen
     const headers: Record<string, string> = {};
     if (data.attendees && data.attendees.length > 0) {
@@ -206,7 +238,7 @@ export async function updateEvent(
     const response = await client.updateCalendarObject({
         calendarObject: {
             ...events[0],
-            data: generateICalString(updatedEvent),
+            data: generateICalString(updatedEvent, options),
         },
         headers: headers,
     });
@@ -216,6 +248,7 @@ export async function updateEvent(
         success: true,
         message: 'Termin erfolgreich aktualisiert',
         uid: data.eventId,
+        timeZone: timeZone || 'UTC',
         details: {
             title: updatedEvent.title,
             start: updatedEvent.start,
@@ -304,24 +337,88 @@ export async function searchEvents(
     });
 }
 
-function generateICalString(event: IEventICal) {
+interface IICalOptions {
+    timeZone?: string;
+    startLine?: string;
+    endLine?: string;
+}
+
+/** Formatiert ein Datum als echten UTC-Zeitstempel (DTSTART:20250101T120000Z) */
+function formatUtcDateTime(date: Date): string {
+    return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+}
+
+/** Prüft, ob die Zeitzone von Intl unterstützt wird */
+function isValidTimeZone(timeZone: string): boolean {
+    try {
+        new Intl.DateTimeFormat('en-US', { timeZone });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Formatiert den Zeitpunkt als lokale Wandzeit der angegebenen Zeitzone
+ * (DTSTART;TZID=Europe/Berlin:20250101T120000).
+ *
+ * Wichtig: Es wird die Wandzeit der Ziel-Zeitzone verwendet, nicht die Serverzeit.
+ * Sonst entstehen Verschiebungen, sobald die gewählte Zeitzone nicht der Systemzeitzone entspricht.
+ */
+function formatDateTimeInTimeZone(date: Date, timeZone: string): string {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23',
+    }).formatToParts(date);
+
+    const get = (type: string, fallback = '00'): string =>
+        parts.find((part) => part.type === type)?.value ?? fallback;
+
+    return `${get('year')}${get('month')}${get('day')}T${get('hour')}${get('minute')}${get('second')}`;
+}
+
+/**
+ * Erzeugt die DTSTART-/DTEND-Zeile.
+ * Mit Zeitzone als lokale Wandzeit mit TZID, ohne Zeitzone als echter UTC-Zeit.
+ */
+function buildDateTimeProperty(
+    name: 'DTSTART' | 'DTEND',
+    value: string | Date | undefined,
+    timeZone: string,
+    fallback: Date,
+): string {
+    const date = value ? new Date(value) : fallback;
+    const safeDate = isNaN(date.getTime()) ? fallback : date;
+
+    return timeZone
+        ? `${name};TZID=${timeZone}:${formatDateTimeInTimeZone(safeDate, timeZone)}`
+        : `${name}:${formatUtcDateTime(safeDate)}`;
+}
+
+function generateICalString(event: IEventICal, options: IICalOptions = {}) {
     const timestamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-    const startDate = event.start ? new Date(event.start) : new Date();
-    const endDate = event.end ? new Date(event.end) : new Date(startDate.getTime() + 60 * 60 * 1000);
+    const now = new Date();
+    const startDate = event.start ? new Date(event.start) : now;
+    const endFallback = new Date(startDate.getTime() + 60 * 60 * 1000);
 
-    // Formatierung für lokale Zeit ohne Zeitzone (DTSTART/DTEND ohne Z)
-    // Dies lässt Nextcloud die Serverzeit verwenden
-    const formatDateTime = (date: Date): string => {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        const hours = String(date.getHours()).padStart(2, '0');
-        const minutes = String(date.getMinutes()).padStart(2, '0');
-        const seconds = String(date.getSeconds()).padStart(2, '0');
-        return `${year}${month}${day}T${hours}${minutes}${seconds}`;
-    };
+    const rawTimeZone = options.timeZone ?? event.timeZone;
+    const requestedTimeZone = typeof rawTimeZone === 'string' ? rawTimeZone.trim() : '';
+    const timeZone = requestedTimeZone && isValidTimeZone(requestedTimeZone) ? requestedTimeZone : '';
 
-    const tz = typeof event.timeZone === 'string' && event.timeZone.trim() !== '' ? event.timeZone.trim() : '';
+    if (requestedTimeZone && !timeZone) {
+        console.warn(`Unbekannte Zeitzone "${requestedTimeZone}" - es wird UTC verwendet.`);
+    }
+
+    const startLine =
+        options.startLine ?? buildDateTimeProperty('DTSTART', event.start, timeZone, now);
+    const endLine =
+        options.endLine ?? buildDateTimeProperty('DTEND', event.end, timeZone, endFallback);
 
     // iCal-String: mit TZID wenn gesetzt, sonst UTC-Zeitstempel
     let iCalString = `BEGIN:VCALENDAR
@@ -330,8 +427,8 @@ PRODID:-//n8n//Nextcloud Calendar Node//EN
 BEGIN:VEVENT
 UID:${event.uid}
 DTSTAMP:${timestamp}
-${tz ? `DTSTART;TZID=${tz}:${formatDateTime(startDate)}` : `DTSTART:${formatDateTime(startDate)}Z`}
-${tz ? `DTEND;TZID=${tz}:${formatDateTime(endDate)}` : `DTEND:${formatDateTime(endDate)}Z`}
+${startLine}
+${endLine}
 SUMMARY:${event.title || 'Unbenannter Termin'}
 `;
 

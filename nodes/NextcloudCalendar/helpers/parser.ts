@@ -45,6 +45,8 @@ interface IParsedEvent {
     location?: string;
     start?: Date;
     end?: Date;
+    rawDTStart?: string;
+    rawDTEnd?: string;
     tzidStart?: string;
     tzidEnd?: string;
     created?: Date;
@@ -116,10 +118,12 @@ function parseICS(icsData: string): { vevent: IParsedEvent } {
                 break;
             case 'DTSTART':
                 event.start = parseICalDate(value);
+                event.rawDTStart = rawLine;
                 if (params.TZID) event.tzidStart = params.TZID;
                 break;
             case 'DTEND':
                 event.end = parseICalDate(value);
+                event.rawDTEnd = rawLine;
                 if (params.TZID) event.tzidEnd = params.TZID;
                 break;
             case 'CREATED':
@@ -292,6 +296,8 @@ export function parseEventResults(events: CalendarObjectType[]): IEventResponse[
             title: eventInfo.summary ?? '',
             start: eventInfo.start?.toISOString(),
             end: eventInfo.end?.toISOString(),
+            rawDTStart: eventInfo.rawDTStart,
+            rawDTEnd: eventInfo.rawDTEnd,
             tzidStart: eventInfo.tzidStart,
             tzidEnd: eventInfo.tzidEnd,
             dtstamp: eventInfo.dtstamp?.toISOString(),
@@ -341,6 +347,8 @@ export function parseICalEvent(calendarObject: DAVCalendarObject): IEventRespons
         title: event.summary ?? '',
         start: event.start?.toISOString(),
         end: event.end?.toISOString(),
+        rawDTStart: event.rawDTStart,
+        rawDTEnd: event.rawDTEnd,
         tzidStart: event.tzidStart,
         tzidEnd: event.tzidEnd,
         dtstamp: event.dtstamp?.toISOString(),
