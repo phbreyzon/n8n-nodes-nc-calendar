@@ -42,6 +42,15 @@ export class NextcloudCalendar implements INodeType {
         },
         inputs: ['main'],
         outputs: ['main'],
+        codex: {
+            categories: ['Productivity'],
+            // Der Node-Typ setzt sich aus Paketname und Node-Name zusammen
+            // (<paketname>.<nodename>). Durch die Umbenennung des Pakets von
+            // n8n-nodes-nextcloud-calendar auf n8n-nodes-nc-calendar können
+            // bestehende Workflows, die noch den alten Typ referenzieren, sonst
+            // nicht mehr aufgelöst werden ("Unrecognized node type").
+            alias: ['n8n-nodes-nextcloud-calendar.nextcloudCalendar'],
+        },
         credentials: [
             {
                 name: 'nextcloudCalendarApi',
