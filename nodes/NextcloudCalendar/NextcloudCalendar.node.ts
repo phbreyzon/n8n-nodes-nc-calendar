@@ -49,7 +49,12 @@ export class NextcloudCalendar implements INodeType {
             // n8n-nodes-nextcloud-calendar auf n8n-nodes-nc-calendar können
             // bestehende Workflows, die noch den alten Typ referenzieren, sonst
             // nicht mehr aufgelöst werden ("Unrecognized node type").
-            alias: ['n8n-nodes-nextcloud-calendar.nextcloudCalendar'],
+            // Der Node ist usableAsTool, dadurch existiert zusätzlich eine
+            // Tool-Variante mit dem Suffix "Tool" - beide werden aliased.
+            alias: [
+                'n8n-nodes-nextcloud-calendar.nextcloudCalendar',
+                'n8n-nodes-nextcloud-calendar.nextcloudCalendarTool',
+            ],
         },
         credentials: [
             {
