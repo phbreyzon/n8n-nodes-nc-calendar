@@ -17,6 +17,11 @@ export const resources: INodeProperties[] = [
                 name: 'Termin',
                 value: 'event',
                 description: 'Termine planen und organisieren'
+            },
+            {
+                name: 'Aufgabe',
+                value: 'todo',
+                description: 'Aufgaben (VTODO) suchen, anlegen, ändern und löschen'
             }
         ],
         default: 'calendar',

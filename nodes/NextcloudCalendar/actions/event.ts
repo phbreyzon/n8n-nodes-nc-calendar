@@ -3,6 +3,7 @@ import { initClient } from '../helpers/client';
 import { IEventCreate, IEventUpdate, IEventResponse } from '../interfaces/event';
 import { findCalendar } from './calendar';
 import { parseICalEvent } from '../helpers/parser';
+import { buildDateProperty, isValidTimeZone } from '../helpers/datetime';
 
 interface IAttendeeICal {
     displayName?: string;
@@ -343,46 +344,6 @@ interface IICalOptions {
     endLine?: string;
 }
 
-/** Formatiert ein Datum als echten UTC-Zeitstempel (DTSTART:20250101T120000Z) */
-function formatUtcDateTime(date: Date): string {
-    return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-}
-
-/** Prüft, ob die Zeitzone von Intl unterstützt wird */
-function isValidTimeZone(timeZone: string): boolean {
-    try {
-        new Intl.DateTimeFormat('en-US', { timeZone });
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-/**
- * Formatiert den Zeitpunkt als lokale Wandzeit der angegebenen Zeitzone
- * (DTSTART;TZID=Europe/Berlin:20250101T120000).
- *
- * Wichtig: Es wird die Wandzeit der Ziel-Zeitzone verwendet, nicht die Serverzeit.
- * Sonst entstehen Verschiebungen, sobald die gewählte Zeitzone nicht der Systemzeitzone entspricht.
- */
-function formatDateTimeInTimeZone(date: Date, timeZone: string): string {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hourCycle: 'h23',
-    }).formatToParts(date);
-
-    const get = (type: string, fallback = '00'): string =>
-        parts.find((part) => part.type === type)?.value ?? fallback;
-
-    return `${get('year')}${get('month')}${get('day')}T${get('hour')}${get('minute')}${get('second')}`;
-}
-
 /**
  * Erzeugt die DTSTART-/DTEND-Zeile.
  * Mit Zeitzone als lokale Wandzeit mit TZID, ohne Zeitzone als echter UTC-Zeit.
@@ -393,12 +354,7 @@ function buildDateTimeProperty(
     timeZone: string,
     fallback: Date,
 ): string {
-    const date = value ? new Date(value) : fallback;
-    const safeDate = isNaN(date.getTime()) ? fallback : date;
-
-    return timeZone
-        ? `${name};TZID=${timeZone}:${formatDateTimeInTimeZone(safeDate, timeZone)}`
-        : `${name}:${formatUtcDateTime(safeDate)}`;
+    return buildDateProperty(name, value, { timeZone, fallback });
 }
 
 function generateICalString(event: IEventICal, options: IICalOptions = {}) {
