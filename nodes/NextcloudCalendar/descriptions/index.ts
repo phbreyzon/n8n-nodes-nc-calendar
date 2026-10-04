@@ -1,5 +1,6 @@
 // Exportiere alle Elemente aus den Modulen
 export { eventOperations, eventFields } from './event';
+export { todoOperations, todoFields } from './todo';
 export { calendarOperations, calendarFields } from './calendar'; // Diese müssten noch erstellt werden
 export { resources } from './resources'; 
 

@@ -15,9 +15,11 @@ import { DAVCalendar } from 'tsdav';
 // Importe der Aktionen und Hilfsfunktionen
 import * as calendarActions from './actions/calendar';
 import * as eventActions from './actions/event';
+import * as todoActions from './actions/todo';
 import { parseNextcloudResponse } from './helpers/nextcloud';
 import { ICalendarCreate } from './interfaces/calendar';
 import { IEventCreate, IEventUpdate } from './interfaces/event';
+import { ITodoBase, ITodoCreate, ITodoUpdate, TODO_STATUSES } from './interfaces/todo';
 
 // Beschreibungen importieren
 import {
@@ -26,6 +28,8 @@ import {
     calendarFields,
     eventOperations,
     eventFields,
+    todoOperations,
+    todoFields,
 } from './descriptions';
 
 export class NextcloudCalendar implements INodeType {
@@ -76,9 +80,13 @@ export class NextcloudCalendar implements INodeType {
             // Event-Operationen
             eventOperations[0],
 
+            // Aufgaben-Operationen
+            todoOperations[0],
+
             // Feld-Definitionen
             ...calendarFields,
             ...eventFields,
+            ...todoFields,
         ],
     };
 
@@ -193,6 +201,23 @@ export class NextcloudCalendar implements INodeType {
                 return (value || id || '').trim();
             }
             return '';
+        };
+
+        // Prüft, ob ein als Datum angegebenes Feld tatsächlich als Datum interpretierbar ist.
+        // Ohne diese Prüfung würde ein ungültiger Wert stillschweigend auf "jetzt" gesetzt.
+        const assertValidDate = (
+            value: string | undefined,
+            label: string,
+            itemIndex: number,
+        ): void => {
+            if (value === undefined || value === '') {
+                return;
+            }
+            if (isNaN(new Date(value).getTime())) {
+                throw new NodeOperationError(this.getNode(), `Ungültiges Datum für "${label}": ${value}`, {
+                    itemIndex,
+                });
+            }
         };
 
         for (let i = 0; i < items.length; i++) {
@@ -616,6 +641,236 @@ export class NextcloudCalendar implements INodeType {
                                 }
                             });
                         }
+                    }
+                } else if (resource === 'todo') {
+                    if (operation === 'getAll' || operation === 'search') {
+                        const calendarName = getCalendarName(this.getNodeParameter('calendarName', i));
+
+                        const query: todoActions.ITodoQuery = {
+                            status: this.getNodeParameter('statusFilter', i, 'ALL') as string,
+                            dueFrom: (this.getNodeParameter('dueFrom', i, '') as string) || undefined,
+                            dueUntil: (this.getNodeParameter('dueUntil', i, '') as string) || undefined,
+                            limit: this.getNodeParameter('limit', i, 0) as number,
+                        };
+
+                        if (operation === 'search') {
+                            const searchTerm = this.getNodeParameter('searchTerm', i) as string;
+                            const todos = await todoActions.searchTodos(this, calendarName, searchTerm, query);
+
+                            returnData.push({
+                                success: true,
+                                operation: 'search',
+                                resource: 'todo',
+                                message: todos.length
+                                    ? `${todos.length} Aufgaben gefunden`
+                                    : 'Keine Aufgaben mit dem Suchbegriff gefunden',
+                                data: {
+                                    todos: todos.map(todo => parseNextcloudResponse(todo)),
+                                    searchTerm,
+                                    count: todos.length,
+                                }
+                            });
+                        } else {
+                            const todos = await todoActions.getTodos(this, calendarName, query);
+
+                            returnData.push({
+                                success: true,
+                                operation: 'getAll',
+                                resource: 'todo',
+                                message: todos.length
+                                    ? `${todos.length} Aufgaben gefunden`
+                                    : 'Keine Aufgaben gefunden',
+                                data: {
+                                    todos: todos.map(todo => parseNextcloudResponse(todo)),
+                                    count: todos.length,
+                                }
+                            });
+                        }
+                    } else if (operation === 'get') {
+                        const calendarName = getCalendarName(this.getNodeParameter('calendarName', i));
+                        const todoId = this.getNodeParameter('todoId', i) as string;
+                        const response = await todoActions.getTodo(this, calendarName, todoId);
+
+                        returnData.push({
+                            success: true,
+                            operation: 'get',
+                            resource: 'todo',
+                            message: 'Aufgabe erfolgreich abgerufen',
+                            data: parseNextcloudResponse(response)
+                        });
+                    } else if (operation === 'create') {
+                        const calendarName = getCalendarName(this.getNodeParameter('calendarName', i));
+                        const title = (this.getNodeParameter('title', i) as string).trim();
+
+                        if (!title) {
+                            throw new NodeOperationError(this.getNode(), 'Titel der Aufgabe darf nicht leer sein', {
+                                itemIndex: i,
+                            });
+                        }
+
+                        const status = this.getNodeParameter('status', i, 'NEEDS-ACTION') as ITodoBase['status'];
+                        if (status && !TODO_STATUSES.includes(status)) {
+                            throw new NodeOperationError(this.getNode(), `Ungültiger Aufgabenstatus: ${status}`, {
+                                itemIndex: i,
+                            });
+                        }
+
+                        const due = (this.getNodeParameter('due', i, '') as string) || undefined;
+                        const start = (this.getNodeParameter('start', i, '') as string) || undefined;
+
+                        assertValidDate(due, 'Fälligkeit', i);
+                        assertValidDate(start, 'Start', i);
+
+                        const todoData: ITodoCreate = {
+                            calendarName,
+                            title,
+                            description: this.getNodeParameter('description', i, '') as string,
+                            status,
+                            percentComplete: this.getNodeParameter('percentComplete', i, 0) as number,
+                            priority: this.getNodeParameter('priority', i, 0) as number,
+                            categories: this.getNodeParameter('categories', i, '') as string,
+                            due,
+                            start,
+                            dateOnly: this.getNodeParameter('dateOnly', i, false) as boolean,
+                        };
+
+                        const timeZone = getTimeZoneName(this.getNodeParameter('timeZone', i, ''));
+                        if (timeZone) {
+                            todoData.timeZone = timeZone;
+                        }
+
+                        const response = await todoActions.createTodo(this, todoData);
+
+                        returnData.push({
+                            success: true,
+                            operation: 'create',
+                            resource: 'todo',
+                            message: 'Aufgabe erfolgreich erstellt',
+                            data: response
+                        });
+                    } else if (operation === 'update') {
+                        const calendarName = getCalendarName(this.getNodeParameter('calendarName', i));
+                        const todoId = this.getNodeParameter('todoId', i) as string;
+                        const updateFields = this.getNodeParameter('updateFields', i) as IDataObject;
+
+                        // Nur tatsächlich gesetzte Felder übernehmen. Nicht gesetzte Felder
+                        // dürfen die bestehende Aufgabe nicht unbeabsichtigt leeren.
+                        const changes: Partial<ITodoBase> = {};
+                        const assignIfFilled = (key: keyof ITodoBase, value: unknown) => {
+                            if (value === undefined || value === null || value === '') {
+                                return;
+                            }
+                            (changes as Record<string, unknown>)[key] = value;
+                        };
+
+                        assignIfFilled('title', (updateFields.title as string)?.trim());
+                        assignIfFilled('description', updateFields.description);
+                        assignIfFilled('categories', updateFields.categories);
+                        assignIfFilled('due', updateFields.due);
+                        assignIfFilled('start', updateFields.start);
+
+                        if (updateFields.status) {
+                            const status = updateFields.status as ITodoBase['status'];
+                            if (!TODO_STATUSES.includes(status as never)) {
+                                throw new NodeOperationError(this.getNode(), `Ungültiger Aufgabenstatus: ${status}`, {
+                                    itemIndex: i,
+                                });
+                            }
+                            changes.status = status;
+                        }
+
+                        // 0 bedeutet hier "Fortschritt entfernen", alles andere wird gesetzt
+                        const percentComplete = updateFields.percentComplete as number | undefined;
+                        if (typeof percentComplete === 'number' && !isNaN(percentComplete)) {
+                            changes.percentComplete = percentComplete;
+                        }
+
+                        const priority = updateFields.priority as number | undefined;
+                        if (typeof priority === 'number' && !isNaN(priority) && priority > 0) {
+                            changes.priority = priority;
+                        }
+
+                        if (updateFields.dateOnly) {
+                            changes.dateOnly = true;
+                        }
+
+                        const timeZone = getTimeZoneName(this.getNodeParameter('timeZone', i, ''));
+                        if (timeZone) {
+                            changes.timeZone = timeZone;
+                        }
+
+                        // Entfernen ist eine eigene Aktion, damit ein leeres Feld
+                        // nicht ungewollt Inhalte löscht
+                        const clearFields = (updateFields.clearFields as string[] | undefined) ?? [];
+                        if (Array.isArray(clearFields)) {
+                            for (const field of clearFields) {
+                                switch (field) {
+                                    case 'DUE':
+                                        changes.due = '';
+                                        break;
+                                    case 'DTSTART':
+                                        changes.start = '';
+                                        break;
+                                    case 'DESCRIPTION':
+                                        changes.description = '';
+                                        break;
+                                    case 'CATEGORIES':
+                                        changes.categories = '';
+                                        break;
+                                    case 'PRIORITY':
+                                        changes.priority = 0;
+                                        break;
+                                    case 'PERCENT-COMPLETE':
+                                        changes.percentComplete = 0;
+                                        break;
+                                }
+                            }
+                        }
+
+                        if (Object.keys(changes).length === 0) {
+                            throw new NodeOperationError(
+                                this.getNode(),
+                                'Keine Änderungen angegeben - mindestens ein Feld in "Update Fields" setzen',
+                                { itemIndex: i }
+                            );
+                        }
+
+                        assertValidDate(changes.due as string | undefined, 'Fälligkeit', i);
+                        assertValidDate(changes.start as string | undefined, 'Start', i);
+
+                        const updateData: ITodoUpdate = {
+                            calendarName,
+                            todoId,
+                            ...changes,
+                        };
+
+                        const response = await todoActions.updateTodo(this, updateData);
+
+                        returnData.push({
+                            success: true,
+                            operation: 'update',
+                            resource: 'todo',
+                            message: 'Aufgabe erfolgreich aktualisiert',
+                            data: response
+                        });
+                    } else if (operation === 'delete') {
+                        const calendarName = getCalendarName(this.getNodeParameter('calendarName', i));
+                        const todoId = this.getNodeParameter('todoId', i) as string;
+                        const response = await todoActions.deleteTodo(this, calendarName, todoId);
+
+                        if (!response || !response.success) {
+                            throw new NodeOperationError(this.getNode(), 'Aufgabe konnte nicht gelöscht werden', {
+                                itemIndex: i,
+                            });
+                        }
+
+                        returnData.push({
+                            success: true,
+                            operation: 'delete',
+                            resource: 'todo',
+                            message: 'Aufgabe erfolgreich gelöscht',
+                            data: response
+                        });
                     }
                 }
             } catch (error) {
