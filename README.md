@@ -131,6 +131,10 @@ Datumswerte mit `TZID` werden als Wandzeit der Zeitzone gelesen, also nicht in
 den UTC-Zeitpunkt umgerechnet. Das entspricht dem Verhalten der Termin-Operationen;
 die ursprüngliche Zeile steht zusätzlich in `rawDUE` bzw. `rawDTStart`.
 
+## Changelog
+
+Die Änderungen je Version stehen in [CHANGELOG.md](CHANGELOG.md).
+
 ## Lizenz
 
 [MIT](LICENSE.md)
